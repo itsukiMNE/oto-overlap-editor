@@ -11,7 +11,7 @@
 
 使用网页版的好处是：以后工具更新后，只要重新打开或刷新网页，就可以直接使用最新版本，不需要重新下载文件。
 
-> GitHub Pages 地址：发布 Pages 后可在这里填写你的网页链接。
+> GitHub Pages 地址：https://itsukimne.github.io/oto-overlap-editor/
 
 如果需要离线使用，也可以下载仓库中的 `index.html` 和 `script.js`，保持二者位于同一文件夹后直接打开 `index.html`。
 

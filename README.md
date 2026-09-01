@@ -77,20 +77,6 @@ README.md
 
 `index.html` 通过相对路径读取 `script.js`，因此可以直接部署在 GitHub Pages 的仓库根目录。
 
-## GitHub Pages 发布方式
-
-仓库公开后，在 GitHub 中进入：
-
-`Settings` → `Pages` → `Build and deployment`
-
-设置：
-
-- Source：`Deploy from a branch`
-- Branch：`main`
-- Folder：`/(root)`
-
-保存后，GitHub 会自动发布网页。之后只要更新仓库里的 `index.html` 或 `script.js`，网页版也会随之更新。
-
 ## 关于编码
 
 工具读取文件时会优先识别 UTF-8；如果不是有效 UTF-8，则按日文 ANSI（CP932 / Shift_JIS）读取。

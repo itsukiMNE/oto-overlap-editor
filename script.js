@@ -110,15 +110,11 @@
 
     const t = normalizeTarget(target);
 
-    // v0.03: Any target beginning with ん is treated as ん,
-    // even when letters or other suffix markers follow it (e.g. んm, んN).
-    if (t.startsWith('ん')) return 'vowel_n';
-
-    // v0.11: Vowels / を may carry a numeric suffix and are still treated as vowels.
-    // Examples: あ2, い03, を1.
-    if (VOWEL_N.filter(v => v !== 'ん').some(v => t === v || new RegExp('^' + v + '\\d+$').test(t))) {
-      return 'vowel_n';
-    }
+    // v0.14: あ / い / う / え / お / を / ん share one suffix rule.
+    // If one of these kana is the base alias, trailing numbers, letters, or non-kana
+    // markers do not change the classification (e.g. あ2, を1, んm, んN).
+    // Kana combinations such as うぃ are not matched here and continue to the normal rules.
+    if (/^[あいうえおをん](?:$|[^ぁ-ゖァ-ヺ].*)/u.test(t)) return 'vowel_n';
 
     if (startsWithAny(t, KTP_PREFIXES)) return 'ktp';
     if (startsWithAny(t, WY_PREFIXES)) return 'wy';

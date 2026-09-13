@@ -110,7 +110,7 @@
 
     const t = normalizeTarget(target);
 
-    // v0.14: あ / い / う / え / お / を / ん share one suffix rule.
+    // v0.15: あ / い / う / え / お / を / ん share one suffix rule.
     // If one of these kana is the base alias, trailing numbers, letters, or non-kana
     // markers do not change the classification (e.g. あ2, を1, んm, んN).
     // Kana combinations such as うぃ are not matched here and continue to the normal rules.
@@ -127,7 +127,7 @@
 
     const category = classify(target);
     if (category === 'ktp') return -5;
-    if (category === 'wy' || category === 'ending') return preutterance / 2 - 1;
+    if (category === 'wy' || category === 'ending') return preutterance * 2 / 5;
     if (category === 'vowel_n') return preutterance * 2;
     return preutterance / 3;
   }

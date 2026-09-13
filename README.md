@@ -3,7 +3,7 @@
 用于批量调整 UTAU `oto.ini` 中 **Overlap（重叠）** 数值的浏览器小工具。
 
 **作者：itsukiMNE**  
-当前版本：**v0.14**
+当前版本：**v0.15**
 
 ## 网页版（推荐）
 
@@ -33,9 +33,9 @@
 | Alias 类型 | Overlap |
 | --- | --- |
 | K / T / P 系及相关拗音、扩展音 | `-5` |
-| W / Y 系 | `Preutterance / 2 - 1` |
+| W / Y 系 | `Preutterance × 2/5` |
 | 母音、`を`、`ん` | `Preutterance × 2` |
-| `a/i/u/e/o/n R...`、`a/i/u/e/o/n E`、`a/i/u/e/o/n -` 等语尾 | `Preutterance / 2 - 1` |
+| `a/i/u/e/o/n R...`、`a/i/u/e/o/n E`、`a/i/u/e/o/n -` 等语尾 | `Preutterance × 2/5` |
 | 其他 | `Preutterance / 3` |
 
 ### 优先规则
@@ -75,7 +75,7 @@ script.js
 README.md
 ```
 
-`index.html` 通过相对路径读取 `script.js`。
+`index.html` 通过相对路径读取 `script.js`，因此可以直接部署在 GitHub Pages 的仓库根目录。
 
 ## 关于编码
 

@@ -8,6 +8,13 @@
   const resultText = document.getElementById('resultText');
   const previewStatus = document.getElementById('previewStatus');
   const previewContainer = document.getElementById('previewContainer');
+  const generateBxBtn = document.getElementById('generateBxBtn');
+  const copyBxBtn = document.getElementById('copyBxBtn');
+  const copyBxMojibakeBtn = document.getElementById('copyBxMojibakeBtn');
+  const bxStatus = document.getElementById('bxStatus');
+  const bxPreviewContainer = document.getElementById('bxPreviewContainer');
+  const bxResultBox = document.getElementById('bxResultBox');
+  const bxResultText = document.getElementById('bxResultText');
 
   let originalText = '';
   let originalBytes = null;
@@ -16,6 +23,8 @@
   let parsedLines = [];
   let modifiedText = '';
   let sourceFileName = 'oto.ini';
+  let bxModifiedText = '';
+  let bxModifiedBytes = null;
 
   const KTP_PREFIXES = [
     'か','き','く','け','こ','きゃ','きゅ','きょ','きぇ',
@@ -234,6 +243,168 @@
     };
   }
 
+  function roundOne(value) {
+    return Math.round((value + Number.EPSILON) * 10) / 10;
+  }
+
+  function formatCompactOne(value) {
+    if (!Number.isFinite(value)) return '';
+    const rounded = roundOne(value);
+    return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+  }
+
+  function parseBxSource(line) {
+    const data = getAliasAndSound(line);
+    if (!data) return null;
+    const rawAlias = data.alias.trim();
+    const m = rawAlias.match(/^-\s+(.+)$/u);
+    if (!m) return null;
+
+    const x = m[1];
+    const offset = parseFloat(data.parts[1]);
+    const consonant = parseFloat(data.parts[2]);
+    const cutoff = parseFloat(data.parts[3]);
+    const pre = parseFloat(data.parts[4]);
+    if (![offset, consonant, cutoff, pre].every(Number.isFinite)) return null;
+
+    const newOffset = 600;
+    const delta = offset - newOffset;
+    const newConsonant = consonant + delta;
+    const newCutoff = cutoff - delta;
+    const newPre = pre + delta;
+    const newOverlap = roundOne(newPre / 3);
+
+    return {
+      left: data.left,
+      sourceAlias: rawAlias,
+      newAlias: `b${x}`,
+      newOffset,
+      newConsonant,
+      newCutoff,
+      newPre,
+      newOverlap
+    };
+  }
+
+  function getAliasByteRange(lineBytes) {
+    let eq = -1;
+    let comma = -1;
+    for (let i = 0; i < lineBytes.length; i++) {
+      if (eq < 0 && lineBytes[i] === 0x3D) eq = i;
+      else if (eq >= 0 && lineBytes[i] === 0x2C) { comma = i; break; }
+    }
+    if (eq < 0 || comma < 0) return null;
+    return { eq, aliasStart: eq + 1, aliasEnd: comma };
+  }
+
+  function buildBxByteLine(lineBytes, bx) {
+    const range = getAliasByteRange(lineBytes);
+    if (!range) return null;
+
+    // Reuse the original Japanese bytes after "- " and only prepend ASCII "b".
+    let xStart = range.aliasStart;
+    while (xStart < range.aliasEnd && (lineBytes[xStart] === 0x20 || lineBytes[xStart] === 0x09)) xStart++;
+    if (lineBytes[xStart] !== 0x2D) return null; // '-'
+    xStart++;
+    while (xStart < range.aliasEnd && (lineBytes[xStart] === 0x20 || lineBytes[xStart] === 0x09)) xStart++;
+    const xBytes = lineBytes.slice(xStart, range.aliasEnd);
+
+    const ascii = new TextEncoder();
+    const fields = [
+      ascii.encode('b'), xBytes,
+      ascii.encode(',' + formatCompactOne(bx.newOffset)),
+      ascii.encode(',' + formatCompactOne(bx.newConsonant)),
+      ascii.encode(',' + formatCompactOne(bx.newCutoff)),
+      ascii.encode(',' + formatCompactOne(bx.newPre)),
+      ascii.encode(',' + formatNumber(bx.newOverlap))
+    ];
+
+    return concatBytes([
+      lineBytes.slice(0, range.aliasStart),
+      ...fields
+    ]);
+  }
+
+  function buildBxPreview() {
+    if (!originalText || !originalBytes) return;
+
+    const { lines, newline } = parseText(originalText);
+    const byteLines = splitByteLines(originalBytes);
+    const rows = [];
+    const textLines = [];
+    const byteChunks = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const bx = parseBxSource(lines[i]);
+      if (!bx) continue;
+
+      const newLine = `${bx.left}=${bx.newAlias},${formatCompactOne(bx.newOffset)},${formatCompactOne(bx.newConsonant)},${formatCompactOne(bx.newCutoff)},${formatCompactOne(bx.newPre)},${formatNumber(bx.newOverlap)}`;
+      textLines.push(newLine);
+      rows.push(bx);
+
+      const byteLine = byteLines[i];
+      if (byteLine) {
+        const newByteLine = buildBxByteLine(byteLine.content, bx);
+        if (newByteLine) {
+          byteChunks.push(newByteLine, byteLine.ending.length ? byteLine.ending : new TextEncoder().encode(newline));
+        }
+      }
+    }
+
+    bxModifiedText = textLines.join(newline);
+    if (bxModifiedText && originalText.endsWith(newline)) bxModifiedText += newline;
+    bxResultText.value = bxModifiedText;
+    bxResultBox.style.display = rows.length ? 'block' : 'none';
+
+    if (byteChunks.length) {
+      bxModifiedBytes = concatBytes(byteChunks);
+    } else {
+      bxModifiedBytes = null;
+    }
+
+    if (!rows.length) {
+      bxStatus.innerHTML = '<span class="error">没有找到 Alias 为 “- X” 的条目</span>';
+      bxPreviewContainer.innerHTML = '';
+      copyBxBtn.disabled = true;
+      copyBxMojibakeBtn.disabled = true;
+      return;
+    }
+
+    bxStatus.textContent = `已生成 ${rows.length} 条 bX`;
+    copyBxBtn.disabled = false;
+    copyBxMojibakeBtn.disabled = originalEncoding !== 'shift_jis' || !bxModifiedBytes;
+
+    bxPreviewContainer.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>来源 Alias</th>
+              <th>新 Alias</th>
+              <th>Offset</th>
+              <th>Consonant</th>
+              <th>Cutoff</th>
+              <th>Preutterance</th>
+              <th>Overlap</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r => `
+              <tr>
+                <td>${escapeHtml(r.sourceAlias)}</td>
+                <td><strong>${escapeHtml(r.newAlias)}</strong></td>
+                <td>${escapeHtml(formatCompactOne(r.newOffset))}</td>
+                <td>${escapeHtml(formatCompactOne(r.newConsonant))}</td>
+                <td>${escapeHtml(formatCompactOne(r.newCutoff))}</td>
+                <td>${escapeHtml(formatCompactOne(r.newPre))}</td>
+                <td>${escapeHtml(formatNumber(r.newOverlap))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
   function buildPreview() {
     if (!originalText || !originalBytes) return;
 
@@ -356,6 +527,15 @@
       copyBtn.disabled = true;
       copyMojibakeBtn.disabled = true;
       previewBtn.disabled = false;
+      generateBxBtn.disabled = false;
+      copyBxBtn.disabled = true;
+      copyBxMojibakeBtn.disabled = true;
+      bxModifiedText = '';
+      bxModifiedBytes = null;
+      bxPreviewContainer.innerHTML = '';
+      bxResultBox.style.display = 'none';
+      bxResultText.value = '';
+      bxStatus.textContent = '点击“生成 bX”查看结果';
       const encodingLabel = originalEncoding === 'shift_jis' ? '日文 ANSI（CP932 / Shift_JIS）' : 'UTF-8';
       fileStatus.textContent = `${sourceFileName} · 已读取 · 读取编码：${encodingLabel}`;
       previewStatus.textContent = '点击“生成预览”查看修改结果';
@@ -364,6 +544,9 @@
       previewBtn.disabled = true;
       copyBtn.disabled = true;
       copyMojibakeBtn.disabled = true;
+      generateBxBtn.disabled = true;
+      copyBxBtn.disabled = true;
+      copyBxMojibakeBtn.disabled = true;
     }
   });
 
@@ -392,6 +575,35 @@
       const oldText = copyMojibakeBtn.textContent;
       copyMojibakeBtn.textContent = '已复制乱码文本';
       setTimeout(() => { copyMojibakeBtn.textContent = oldText; }, 1200);
+    } catch (e) {
+      alert('当前浏览器不支持 GBK 转码，请使用最新版 Chrome 或 Edge。');
+    }
+  });
+
+  generateBxBtn.addEventListener('click', buildBxPreview);
+
+  copyBxBtn.addEventListener('click', async () => {
+    if (!bxModifiedText) return;
+    try {
+      await navigator.clipboard.writeText(bxModifiedText);
+      const oldText = copyBxBtn.textContent;
+      copyBxBtn.textContent = '已复制';
+      setTimeout(() => { copyBxBtn.textContent = oldText; }, 1200);
+    } catch (e) {
+      bxResultText.focus();
+      bxResultText.select();
+      document.execCommand('copy');
+    }
+  });
+
+  copyBxMojibakeBtn.addEventListener('click', async () => {
+    if (!bxModifiedBytes || originalEncoding !== 'shift_jis') return;
+    try {
+      const mojibakeText = bytesToChineseAnsiMojibake(bxModifiedBytes);
+      await navigator.clipboard.writeText(mojibakeText);
+      const oldText = copyBxMojibakeBtn.textContent;
+      copyBxMojibakeBtn.textContent = '已复制乱码文本';
+      setTimeout(() => { copyBxMojibakeBtn.textContent = oldText; }, 1200);
     } catch (e) {
       alert('当前浏览器不支持 GBK 转码，请使用最新版 Chrome 或 Edge。');
     }

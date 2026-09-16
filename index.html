@@ -221,9 +221,28 @@
     </div>
   </section>
 
-  <footer>UTAU OTO Overlap Editor · v0.16 · itsukiMNE</footer>
+  <section class="panel">
+    <h2>4. bX 生成</h2>
+    <div class="rule-card">
+      <div class="rule-box">
+        从 <code>- X</code> 条目生成对应的 <code>bX</code> 条目。Offset 固定为 <strong>600 ms</strong>；Consonant、Cutoff、Preutterance 会补偿 Offset 的变化以保持原来的绝对位置；Overlap 使用更新后的 <strong>Preutterance / 3</strong>，并四舍五入到小数点后 1 位。
+      </div>
+    </div>
+    <div class="action-row" style="margin-top:14px;">
+      <button id="generateBxBtn" class="primary" disabled>生成 bX</button>
+      <button id="copyBxBtn" disabled>复制 bX 结果</button>
+      <button id="copyBxMojibakeBtn" disabled>复制 bX 为中文 ANSI 乱码</button>
+    </div>
+    <div id="bxStatus" class="status">读取文件后可生成 bX</div>
+    <div id="bxPreviewContainer" style="margin-top:14px;"></div>
+    <div id="bxResultBox" style="margin-top:14px; display:none;">
+      <textarea id="bxResultText" readonly style="width:100%; min-height:220px; resize:vertical; border:1px solid var(--line); border-radius:10px; padding:12px; font-family:Consolas, monospace; font-size:13px;"></textarea>
+    </div>
+  </section>
+
+  <footer>UTAU OTO Overlap Editor · v0.17 · itsukiMNE</footer>
 </div>
 
-<script src="script.js?v=0.16"></script>
+<script src="script.js?v=0.17"></script>
 </body>
 </html>

@@ -405,13 +405,106 @@
       </div>`;
   }
 
+
+  function splitSimplePitchAlias(alias) {
+    const raw = alias.trim();
+    const m = raw.match(/^(.*?)([\s_-]*[A-G](?:#|b)?-?\d+)$/i);
+    if (!m) return { base: raw, suffix: '' };
+    return { base: m[1].trimEnd(), suffix: m[2] };
+  }
+
+  function encodeGeneratedKanaAlias(alias) {
+    if (originalEncoding !== 'shift_jis') {
+      return new TextEncoder().encode(alias);
+    }
+    const first = alias[0];
+    const rest = alias.slice(1);
+    const map = {
+      'を': new Uint8Array([0x82, 0xF0]),
+      'づ': new Uint8Array([0x82, 0xC3])
+    };
+    const head = map[first];
+    if (!head) return null;
+    if (!/^[\x00-\x7F]*$/.test(rest)) return null;
+    return concatBytes([head, new TextEncoder().encode(rest)]);
+  }
+
+  function replaceAliasInByteLine(lineBytes, newAlias) {
+    const range = getAliasByteRange(lineBytes);
+    if (!range) return null;
+    let contentStart = range.aliasStart;
+    while (contentStart < range.aliasEnd && (lineBytes[contentStart] === 0x20 || lineBytes[contentStart] === 0x09)) contentStart++;
+    let contentEnd = range.aliasEnd;
+    while (contentEnd > contentStart && (lineBytes[contentEnd - 1] === 0x20 || lineBytes[contentEnd - 1] === 0x09)) contentEnd--;
+    const encodedAlias = encodeGeneratedKanaAlias(newAlias);
+    if (!encodedAlias) return null;
+    return concatBytes([lineBytes.slice(0, contentStart), encodedAlias, lineBytes.slice(contentEnd)]);
+  }
+
+  function replaceAliasInTextLine(line, newAlias) {
+    const eq = line.indexOf('=');
+    if (eq < 0) return line;
+    const comma = line.indexOf(',', eq + 1);
+    if (comma < 0) return line;
+    const field = line.slice(eq + 1, comma);
+    const lead = (field.match(/^\s*/) || [''])[0];
+    const trail = (field.match(/\s*$/) || [''])[0];
+    return line.slice(0, eq + 1) + lead + newAlias + trail + line.slice(comma);
+  }
+
+  function buildKanaCompletionForMain(lines, modifiedLineBytes, lineEndings, newline) {
+    let hasWo = false;
+    let hasDu = false;
+    const sources = [];
+
+    for (let i = 0; i < lines.length; i++) {
+      const data = getAliasAndSound(lines[i]);
+      if (!data || !data.alias) continue;
+      const parsed = splitSimplePitchAlias(data.alias);
+      if (parsed.base === 'を') hasWo = true;
+      if (parsed.base === 'づ') hasDu = true;
+      if (parsed.base === 'お' || parsed.base === 'ず') {
+        sources.push({ index: i, sourceAlias: data.alias.trim(), base: parsed.base, suffix: parsed.suffix });
+      }
+    }
+
+    const rows = [];
+    const textLines = [];
+    const byteChunks = [];
+    const decoder = new TextDecoder(originalEncoding === 'shift_jis' ? 'shift_jis' : 'utf-8');
+    const fallbackEnding = new TextEncoder().encode(newline);
+
+    for (const source of sources) {
+      const targetBase = source.base === 'お' ? 'を' : 'づ';
+      if ((targetBase === 'を' && hasWo) || (targetBase === 'づ' && hasDu)) continue;
+
+      const newAlias = targetBase + source.suffix;
+      const sourceBytes = modifiedLineBytes[source.index];
+      if (!sourceBytes) continue;
+      const newByteLine = replaceAliasInByteLine(sourceBytes, newAlias);
+      if (!newByteLine) continue;
+
+      textLines.push(decoder.decode(newByteLine));
+      rows.push({ sourceAlias: source.sourceAlias, newAlias });
+      byteChunks.push(newByteLine, (lineEndings[source.index] && lineEndings[source.index].length) ? lineEndings[source.index] : fallbackEnding);
+    }
+
+    const missing = [];
+    if (!hasWo && !sources.some(s => s.base === 'お')) missing.push('を（没有可复制的 お）');
+    if (!hasDu && !sources.some(s => s.base === 'ず')) missing.push('づ（没有可复制的 ず）');
+
+    return { rows, textLines, byteChunks, missing, hasWo, hasDu };
+  }
+
   function buildPreview() {
     if (!originalText || !originalBytes) return;
 
-    const { lines } = parseText(originalText);
+    const { lines, newline } = parseText(originalText);
     const byteLines = splitByteLines(originalBytes);
     const rows = [];
     const outByteChunks = [];
+    const modifiedLineBytes = [];
+    const lineEndings = [];
     let changed = 0;
     let skipped = 0;
 
@@ -419,8 +512,10 @@
       const line = lines[i];
       const byteLine = byteLines[i] || { content: new Uint8Array(0), ending: new Uint8Array(0) };
       const data = getAliasAndSound(line);
+      lineEndings[i] = byteLine.ending;
 
       if (!data) {
+        modifiedLineBytes[i] = byteLine.content;
         outByteChunks.push(byteLine.content, byteLine.ending);
         continue;
       }
@@ -431,6 +526,7 @@
       const newOverlap = calculateOverlap(pre, target);
 
       if (!Number.isFinite(pre) || newOverlap === null) {
+        modifiedLineBytes[i] = byteLine.content;
         outByteChunks.push(byteLine.content, byteLine.ending);
         skipped++;
         continue;
@@ -439,6 +535,7 @@
       const category = classify(target);
       const newText = formatNumber(newOverlap);
       const newByteLine = replaceOverlapInByteLine(byteLine.content, newText);
+      modifiedLineBytes[i] = newByteLine;
       outByteChunks.push(newByteLine, byteLine.ending);
 
       rows.push({
@@ -450,6 +547,14 @@
         newOverlap: newText
       });
       changed++;
+    }
+
+    const kana = buildKanaCompletionForMain(lines, modifiedLineBytes, lineEndings, newline);
+    if (kana.byteChunks.length) {
+      // If the original file had no final newline, insert one before appended aliases.
+      const lastOriginal = outByteChunks.length ? outByteChunks[outByteChunks.length - 1] : null;
+      if (lastOriginal && lastOriginal.length === 0) outByteChunks.push(new TextEncoder().encode(newline));
+      outByteChunks.push(...kana.byteChunks);
     }
 
     modifiedBytes = concatBytes(outByteChunks);
@@ -466,11 +571,18 @@
       return;
     }
 
-    previewStatus.textContent = `可处理 ${changed} 行${skipped ? `，跳过 ${skipped} 行` : ''}`;
+    const kanaNote = kana.rows.length
+      ? `；同时补全 ${kana.rows.map(r => r.newAlias).join('、')}`
+      : (kana.missing.length ? `；${kana.missing.join('、')}` : '；を / づ 已齐全');
+    previewStatus.textContent = `可处理 ${changed} 行${skipped ? `，跳过 ${skipped} 行` : ''}${kanaNote}`;
     copyBtn.disabled = false;
     copyMojibakeBtn.disabled = originalEncoding !== 'shift_jis';
 
+    const completionHtml = kana.rows.length ? `
+      <div class="status" style="margin-bottom:10px;">自动补全：${kana.rows.map(r => `${escapeHtml(r.sourceAlias)} → <strong>${escapeHtml(r.newAlias)}</strong>`).join('；')}</div>` : '';
+
     const html = `
+      ${completionHtml}
       <div class="table-wrap">
         <table>
           <thead>
@@ -538,7 +650,7 @@
       bxStatus.textContent = '点击“生成 bX”查看结果';
       const encodingLabel = originalEncoding === 'shift_jis' ? '日文 ANSI（CP932 / Shift_JIS）' : 'UTF-8';
       fileStatus.textContent = `${sourceFileName} · 已读取 · 读取编码：${encodingLabel}`;
-      previewStatus.textContent = '点击“生成预览”查看修改结果';
+      previewStatus.textContent = '点击“生成完整结果”查看修改及补全结果';
     } catch (e) {
       fileStatus.innerHTML = '<span class="error">读取文件失败</span>';
       previewBtn.disabled = true;
@@ -608,5 +720,6 @@
       alert('当前浏览器不支持 GBK 转码，请使用最新版 Chrome 或 Edge。');
     }
   });
+
 
 })();

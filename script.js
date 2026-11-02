@@ -33,6 +33,11 @@
     'ぱ','ぴ','ぷ','ぺ','ぽ','ぴゃ','ぴゅ','ぴょ','ぴぇ'
   ];
 
+  const CHITSU_FIFTH = [
+    'ちゃ','ち','ちゅ','ちぇ','ちょ',
+    'つぁ','つぃ','つ','つぇ','つぉ'
+  ];
+
   const WY_PREFIXES = [
     'や','ゆ','よ','いぇ',
     'わ','うぃ','うぇ','うぉ'
@@ -106,6 +111,9 @@
     // v0.07: Any "- X" alias is always treated as Other, regardless of X.
     if (/^-\s+\S/u.test(raw)) return 'other';
 
+    // v0.20: Any "* X" alias is treated like the vowel group.
+    if (/^\*\s+\S/u.test(raw)) return 'vowel_n';
+
     // v0.11: Aliases in the form "a / i / u / e / o / n + kana" are always Other.
     // Examples: a あ, i い, n ん -> Preutterance / 3.
     if (/^[aiueon]\s+[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'other';
@@ -125,6 +133,7 @@
     // Kana combinations such as うぃ are not matched here and continue to the normal rules.
     if (/^[あいうえおをん](?:$|[^ぁ-ゖァ-ヺ].*)/u.test(t)) return 'vowel_n';
 
+    if (startsWithAny(t, CHITSU_FIFTH)) return 'chitsu_fifth';
     if (startsWithAny(t, KTP_PREFIXES)) return 'ktp';
     if (startsWithAny(t, WY_PREFIXES)) return 'wy';
 
@@ -135,6 +144,7 @@
     if (!Number.isFinite(preutterance)) return null;
 
     const category = classify(target);
+    if (category === 'chitsu_fifth') return preutterance / 5;
     if (category === 'ktp') return -5;
     if (category === 'wy' || category === 'ending') return preutterance * 2 / 5;
     if (category === 'vowel_n') return preutterance * 2;
@@ -148,6 +158,7 @@
   }
 
   function categoryLabel(category) {
+    if (category === 'chitsu_fifth') return 'ち/つ 特例';
     if (category === 'ktp') return 'K/T/P';
     if (category === 'wy') return 'W/Y';
     if (category === 'vowel_n') return '母音/を/ん';

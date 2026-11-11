@@ -114,9 +114,9 @@
     // v0.20: Any "* X" alias is treated like the vowel group.
     if (/^\*\s+\S/u.test(raw)) return 'vowel_n';
 
-    // v0.11: Aliases in the form "a / i / u / e / o / n + kana" are always Other.
-    // Examples: a あ, i い, n ん -> Preutterance / 3.
-    if (/^[aiueon]\s+[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'other';
+    // v0.21: VC aliases in the form "a / i / u / e / o / n + kana" use 2/5.
+    // Examples: a あ, i い, n ん -> Preutterance × 2/5.
+    if (/^[aiueon]\s+[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'vc';
 
     // v0.12: If "E" is followed by kana in an ending-style alias, treat it as Other.
     // Examples: a Eん, i Eあ, - Eう -> Preutterance / 3.
@@ -146,7 +146,7 @@
     const category = classify(target);
     if (category === 'chitsu_fifth') return preutterance / 5;
     if (category === 'ktp') return -5;
-    if (category === 'wy' || category === 'ending') return preutterance * 2 / 5;
+    if (category === 'wy' || category === 'ending' || category === 'vc') return preutterance * 2 / 5;
     if (category === 'vowel_n') return preutterance * 2;
     return preutterance / 3;
   }
@@ -161,6 +161,7 @@
     if (category === 'chitsu_fifth') return 'ち/つ 特例';
     if (category === 'ktp') return 'K/T/P';
     if (category === 'wy') return 'W/Y';
+    if (category === 'vc') return 'VC';
     if (category === 'vowel_n') return '母音/を/ん';
     if (category === 'ending') return '语尾';
     return '其他';
@@ -428,16 +429,24 @@
     if (originalEncoding !== 'shift_jis') {
       return new TextEncoder().encode(alias);
     }
-    const first = alias[0];
-    const rest = alias.slice(1);
+
+    // v0.21: Generated aliases may contain ASCII framing such as "- を".
+    // Encode supported kana explicitly and preserve ASCII characters as-is.
     const map = {
       'を': new Uint8Array([0x82, 0xF0]),
       'づ': new Uint8Array([0x82, 0xC3])
     };
-    const head = map[first];
-    if (!head) return null;
-    if (!/^[\x00-\x7F]*$/.test(rest)) return null;
-    return concatBytes([head, new TextEncoder().encode(rest)]);
+    const chunks = [];
+    for (const ch of alias) {
+      if (map[ch]) {
+        chunks.push(map[ch]);
+      } else if (ch.charCodeAt(0) <= 0x7F) {
+        chunks.push(new Uint8Array([ch.charCodeAt(0)]));
+      } else {
+        return null;
+      }
+    }
+    return concatBytes(chunks);
   }
 
   function replaceAliasInByteLine(lineBytes, newAlias) {
@@ -464,17 +473,22 @@
   }
 
   function buildKanaCompletionForMain(lines, modifiedLineBytes, lineEndings, newline) {
-    let hasWo = false;
-    let hasDu = false;
+    // v0.21: Complete を, づ, and - を in the same main output.
+    const pairs = [
+      { sourceBase: 'お', targetBase: 'を' },
+      { sourceBase: 'ず', targetBase: 'づ' },
+      { sourceBase: '- お', targetBase: '- を' }
+    ];
+
+    const existingBases = new Set();
     const sources = [];
 
     for (let i = 0; i < lines.length; i++) {
       const data = getAliasAndSound(lines[i]);
       if (!data || !data.alias) continue;
       const parsed = splitSimplePitchAlias(data.alias);
-      if (parsed.base === 'を') hasWo = true;
-      if (parsed.base === 'づ') hasDu = true;
-      if (parsed.base === 'お' || parsed.base === 'ず') {
+      existingBases.add(parsed.base);
+      if (pairs.some(pair => pair.sourceBase === parsed.base)) {
         sources.push({ index: i, sourceAlias: data.alias.trim(), base: parsed.base, suffix: parsed.suffix });
       }
     }
@@ -485,11 +499,12 @@
     const decoder = new TextDecoder(originalEncoding === 'shift_jis' ? 'shift_jis' : 'utf-8');
     const fallbackEnding = new TextEncoder().encode(newline);
 
-    for (const source of sources) {
-      const targetBase = source.base === 'お' ? 'を' : 'づ';
-      if ((targetBase === 'を' && hasWo) || (targetBase === 'づ' && hasDu)) continue;
+    for (const pair of pairs) {
+      if (existingBases.has(pair.targetBase)) continue;
+      const source = sources.find(s => s.base === pair.sourceBase);
+      if (!source) continue;
 
-      const newAlias = targetBase + source.suffix;
+      const newAlias = pair.targetBase + source.suffix;
       const sourceBytes = modifiedLineBytes[source.index];
       if (!sourceBytes) continue;
       const newByteLine = replaceAliasInByteLine(sourceBytes, newAlias);
@@ -498,13 +513,17 @@
       textLines.push(decoder.decode(newByteLine));
       rows.push({ sourceAlias: source.sourceAlias, newAlias });
       byteChunks.push(newByteLine, (lineEndings[source.index] && lineEndings[source.index].length) ? lineEndings[source.index] : fallbackEnding);
+      existingBases.add(pair.targetBase);
     }
 
     const missing = [];
-    if (!hasWo && !sources.some(s => s.base === 'お')) missing.push('を（没有可复制的 お）');
-    if (!hasDu && !sources.some(s => s.base === 'ず')) missing.push('づ（没有可复制的 ず）');
+    for (const pair of pairs) {
+      if (!existingBases.has(pair.targetBase) && !sources.some(s => s.base === pair.sourceBase)) {
+        missing.push(`${pair.targetBase}（没有可复制的 ${pair.sourceBase}）`);
+      }
+    }
 
-    return { rows, textLines, byteChunks, missing, hasWo, hasDu };
+    return { rows, textLines, byteChunks, missing };
   }
 
   function buildPreview() {
@@ -584,7 +603,7 @@
 
     const kanaNote = kana.rows.length
       ? `；同时补全 ${kana.rows.map(r => r.newAlias).join('、')}`
-      : (kana.missing.length ? `；${kana.missing.join('、')}` : '；を / づ 已齐全');
+      : (kana.missing.length ? `；${kana.missing.join('、')}` : '；を / づ / - を 已齐全');
     previewStatus.textContent = `可处理 ${changed} 行${skipped ? `，跳过 ${skipped} 行` : ''}${kanaNote}`;
     copyBtn.disabled = false;
     copyMojibakeBtn.disabled = originalEncoding !== 'shift_jis';

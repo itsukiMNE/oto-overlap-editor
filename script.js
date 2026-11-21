@@ -114,16 +114,18 @@
     // v0.20: Any "* X" alias is treated like the vowel group.
     if (/^\*\s+\S/u.test(raw)) return 'vowel_n';
 
-    // v0.21: VC aliases in the form "a / i / u / e / o / n + kana" use 2/5.
-    // Examples: a あ, i い, n ん -> Preutterance × 2/5.
-    if (/^[aiueon]\s+[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'vc';
-
     // v0.12: If "E" is followed by kana in an ending-style alias, treat it as Other.
     // Examples: a Eん, i Eあ, - Eう -> Preutterance / 3.
     if (/^(?:-|[aiueon])\s+E[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'other';
 
     // v0.08: Ending aliases such as "a R", "i R吸", "u Rh", "a E", and "a -" use the ending rule.
+    // This check must come before VC so that R/E are not mistaken for romanized consonants.
     if (/^[aiueon]\s+(?:[RE]|-)/iu.test(raw)) return 'ending';
+
+    // v0.22: VC aliases are vowel/n + space + romanized consonant only.
+    // Examples: a k, i sh, u ts, n r -> Preutterance × 2/5.
+    // Ordinary VCV aliases such as "a か" are not VC and fall through to Other (1/3).
+    if (/^[aiueon]\s+[bcdfghjklmnpqrstvwxyz]+$/iu.test(raw)) return 'vc';
 
     const t = normalizeTarget(target);
 

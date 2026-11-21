@@ -479,53 +479,61 @@
   }
 
   function buildKanaCompletionForMain(lines, modifiedLineBytes, lineEndings, newline) {
-    // v0.21: Complete を, づ, and - を in the same main output.
+    // v0.24: Complete single aliases and VCV aliases in the same main output.
+    // Check each full alias (including pitch suffix) independently.
     const pairs = [
       { sourceBase: 'お', targetBase: 'を' },
       { sourceBase: 'ず', targetBase: 'づ' },
       { sourceBase: '- お', targetBase: '- を' }
     ];
 
-    const existingBases = new Set();
+    for (const prefix of ['a', 'i', 'u', 'e', 'o', 'n']) {
+      pairs.push({ sourceBase: `${prefix} お`, targetBase: `${prefix} を` });
+      pairs.push({ sourceBase: `${prefix} ず`, targetBase: `${prefix} づ` });
+    }
+
+    const existingAliases = new Set();
     const sources = [];
 
     for (let i = 0; i < lines.length; i++) {
       const data = getAliasAndSound(lines[i]);
       if (!data || !data.alias) continue;
-      const parsed = splitSimplePitchAlias(data.alias);
-      existingBases.add(parsed.base);
+      const alias = data.alias.trim();
+      existingAliases.add(alias);
+      const parsed = splitSimplePitchAlias(alias);
       if (pairs.some(pair => pair.sourceBase === parsed.base)) {
-        sources.push({ index: i, sourceAlias: data.alias.trim(), base: parsed.base, suffix: parsed.suffix });
+        sources.push({ index: i, sourceAlias: alias, base: parsed.base, suffix: parsed.suffix });
       }
     }
 
     const rows = [];
     const textLines = [];
     const byteChunks = [];
+    const missing = [];
     const decoder = new TextDecoder(originalEncoding === 'shift_jis' ? 'shift_jis' : 'utf-8');
     const fallbackEnding = new TextEncoder().encode(newline);
 
     for (const pair of pairs) {
-      if (existingBases.has(pair.targetBase)) continue;
-      const source = sources.find(s => s.base === pair.sourceBase);
-      if (!source) continue;
+      const matchingSources = sources.filter(s => s.base === pair.sourceBase);
+      if (!matchingSources.length) {
+        const hasAnyTarget = Array.from(existingAliases).some(alias => splitSimplePitchAlias(alias).base === pair.targetBase);
+        if (!hasAnyTarget) missing.push(`${pair.targetBase}（没有可复制的 ${pair.sourceBase}）`);
+        continue;
+      }
 
-      const newAlias = pair.targetBase + source.suffix;
-      const sourceBytes = modifiedLineBytes[source.index];
-      if (!sourceBytes) continue;
-      const newByteLine = replaceAliasInByteLine(sourceBytes, newAlias);
-      if (!newByteLine) continue;
+      for (const source of matchingSources) {
+        const newAlias = pair.targetBase + source.suffix;
+        if (existingAliases.has(newAlias)) continue;
 
-      textLines.push(decoder.decode(newByteLine));
-      rows.push({ sourceAlias: source.sourceAlias, newAlias });
-      byteChunks.push(newByteLine, (lineEndings[source.index] && lineEndings[source.index].length) ? lineEndings[source.index] : fallbackEnding);
-      existingBases.add(pair.targetBase);
-    }
+        const sourceBytes = modifiedLineBytes[source.index];
+        if (!sourceBytes) continue;
+        const newByteLine = replaceAliasInByteLine(sourceBytes, newAlias);
+        if (!newByteLine) continue;
 
-    const missing = [];
-    for (const pair of pairs) {
-      if (!existingBases.has(pair.targetBase) && !sources.some(s => s.base === pair.sourceBase)) {
-        missing.push(`${pair.targetBase}（没有可复制的 ${pair.sourceBase}）`);
+        textLines.push(decoder.decode(newByteLine));
+        rows.push({ sourceAlias: source.sourceAlias, newAlias });
+        byteChunks.push(newByteLine, (lineEndings[source.index] && lineEndings[source.index].length) ? lineEndings[source.index] : fallbackEnding);
+        existingAliases.add(newAlias);
       }
     }
 

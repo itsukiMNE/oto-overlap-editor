@@ -109,8 +109,12 @@
 
   .rule-grid {
     display: grid;
-    grid-template-columns: 150px 1fr;
+    grid-template-columns: max-content 1fr;
     gap: 6px 14px;
+  }
+
+  .rule-grid > div:nth-child(odd) {
+    white-space: nowrap;
   }
 
   .status {
@@ -175,6 +179,7 @@
     .wrap { margin-top: 20px; }
     h1 { font-size: 24px; }
     .rule-grid { grid-template-columns: 1fr; }
+    .rule-grid > div:nth-child(odd) { white-space: normal; }
   }
 </style>
 </head>
@@ -246,9 +251,9 @@
   </section>
 
 
-  <footer>UTAU OTO Overlap Editor · v0.24 · itsukiMNE</footer>
+  <footer>UTAU OTO Overlap Editor · v0.25 · itsukiMNE</footer>
 </div>
 
-<script src="script.js?v=0.23"></script>
+<script src="script.js?v=0.25"></script>
 </body>
 </html>

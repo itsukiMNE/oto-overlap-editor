@@ -124,8 +124,12 @@
 
     // v0.22: VC aliases are vowel/n + space + romanized consonant only.
     // Examples: a k, i sh, u ts, n r -> Preutterance × 2/5.
-    // Ordinary VCV aliases such as "a か" are not VC and fall through to Other (1/3).
     if (/^[aiueon]\s+[bcdfghjklmnpqrstvwxyz]+$/iu.test(raw)) return 'vc';
+
+    // v0.23: Ordinary VCV aliases are vowel/n + space + kana.
+    // They must stay in Other (1/3) before normalizeTarget() removes the VCV prefix.
+    // Examples: a あ, a か, i し, u く -> Preutterance / 3.
+    if (/^[aiueon]\s+[ぁ-ゖァ-ヺ]/iu.test(raw)) return 'other';
 
     const t = normalizeTarget(target);
 
